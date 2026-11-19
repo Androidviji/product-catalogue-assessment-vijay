@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug-only: merged into the debug manifest. Release builds never get this config. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Android 17 (API 37) blocks connections to local-network addresses such as 10.0.2.2
+         unless the app holds this runtime permission. Only the debug build talks to a local
+         backend, so only the debug build asks for it. -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+
+    <application
+        android:networkSecurityConfig="@xml/network_security_config"
+        tools:ignore="UnusedAttribute" />
+
+</manifest>

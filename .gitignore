@@ -11,6 +11,7 @@ target/
 
 # Android / Gradle (later stages)
 .gradle/
+.kotlin/
 build/
 local.properties
 *.apk

@@ -134,3 +134,84 @@ Verification actually run (see the stage 2 summary for exact output):
 - A new test first treated the rejected value appearing in `instance` (the request path) as a leak. That
   is the client's own URL, so the test now checks `detail` instead.
 - Result: `./mvnw -B test`: 71 tests, 0 failures.
+
+## Stage 3: Android app
+
+- **Prompt (summary):** build the Android app in Kotlin, Compose and MVVM with a practical Clean
+  Architecture split, against the backend contract that actually exists (inspect it first). Covers home
+  with featured products, categories and search; category sections; search on button only; details with
+  images through the backend; and an enquiry form with client validation, duplicate-submit protection, and
+  success only after backend success. Use constructor injection, add focused tests, and verify on the
+  emulator against the backend and Mailpit. Do not commit.
+
+Decisions made during the build, with evidence:
+
+- **Versions copied from the installed Android Studio template** (`~/AndroidStudioProjects/MyApplication`):
+  AGP 9.5.1 (built-in Kotlin), Kotlin 2.2.10, Compose BOM 2026.02.01, compileSdk/targetSdk 37,
+  Gradle 9.6.0 wrapper. Library versions were checked to exist on Maven before use. They were deliberately
+  pinned to 2025 releases (Retrofit 3.0.0, OkHttp 4.12.0, Coil 3.3.0, Navigation 2.9.5, Lifecycle 2.9.4,
+  kotlinx-serialization 1.9.0) to stay compatible with the Kotlin 2.2 compiler. Retrofit and Coil were
+  confirmed to share OkHttp 4.12.0.
+- **One module, three packages** (presentation, domain, data), plus `AppContainer` for manual
+  constructor injection instead of Hilt, to keep the wiring explainable.
+- **ViewModels take route arguments as constructor parameters** (created with `viewModel { }` in each
+  NavHost destination) rather than reading `SavedStateHandle.toRoute()`. That keeps them plain classes
+  testable on the JVM. The trade-off is that process death is not covered for typed text (documented).
+- **Image URL built in the data layer** (`CatalogueApi.imageUrl`). Coil uses the same OkHttp client, so
+  images follow the same timeouts and debug-only cleartext rules.
+- **Missing featured products:** the home screen shows "Showing X of Y featured products" with Retry,
+  and does not show the missing IDs.
+- **Server validation errors** are mapped from backend field names to form fields in
+  `EnquiryRepositoryImpl`. Errors on fields the form does not have become a general failure.
+- **Search keyboard:** after the first emulator run showed the keyboard covering the results, the
+  keyboard is hidden on submit.
+
+Problem found on the emulator (not caught by unit tests):
+
+- **Android 17 local-network permission.** The first run on the API 37 emulator showed "taking too long
+  to respond" for everything. `nc 10.0.2.2 8080` from `adb shell` answered in 0.28s, and the backend
+  threads were idle (no request arrived from the app). `pm list permissions` showed
+  `android.permission.ACCESS_LOCAL_NETWORK` on this image. Declaring it and granting it with
+  `adb shell pm grant` made the app load immediately, which confirmed the cause. Fix: the permission is
+  declared in the **debug** manifest only, and a debug-only `DevNetworkAccess` asks for it before showing
+  content; the release twin is a no-op. The system prompt appears as "Nearby devices" and was accepted on
+  the emulator.
+
+AI mistakes caught in this stage:
+
+- The first `CatalogueNavHost` refactor (to guard Back with `dropUnlessResumed`) left the enquiry
+  route's `onDone = back` as a function reference instead of a call. The AI caught this when reviewing the
+  diff, before building.
+- When generating `local.properties` for the command-line build, the AI first wrote an unescaped
+  Windows path, which caused a lint PropertyEscape error. Shell quoting then made two further attempts
+  wrong. Fixed by writing `sdk.dir=C\:/Users/...`. Lint also kept reporting the old error from its cache
+  until the lint intermediates were deleted. The file is git-ignored; Android Studio writes its own.
+- During emulator checks, a tap on "Allow" did not register, because the UI-dump helper failed
+  (Git Bash rewrote `/sdcard/...` paths), yet the permission later showed as granted. Since the grant
+  could not be attributed to a verified tap, the AI revoked the permission and repeated the prompt with a
+  fixed helper. That run was confirmed (tap, `granted=true`, home loaded).
+
+Verification actually run:
+
+- `gradlew testDebugUnitTest` (Git Bash and `gradlew.bat` in PowerShell): 41 tests, 0 failures.
+  `assembleDebug`, `assembleRelease` and `lintDebug` succeeded; lint reported 17 warnings (newer dependency
+  versions, `allowBackup` deprecation, unused round launcher icon) and no errors.
+- Backend `./mvnw -B test`: 71 tests, 0 failures (backend unchanged in this stage).
+- Emulator (Medium Phone, API 37) against the local backend and Mailpit, checked with screenshots and UI
+  Automator dumps:
+  - permission prompt and Allow, then home loaded with 4 categories and featured products with images
+  - Men's clothing showed top rated 3, 2, 1 and more: 4
+  - blank search message; `bicycle` showed no results; typing did not search; `backpack` gave 1 result
+    after tapping Search
+  - details showed the image with "Image of …" description and the rating description
+  - enquiry: empty submit and bad email showed field errors
+  - with the backend on `SMTP_PORT=1`: "Your enquiry was not sent", all fields kept, Mailpit count
+    unchanged, backend logged `ConnectException` only
+  - rotated to landscape: fields kept
+  - backend restarted normally, Send: thank-you with reference `8b5c8767…`; the same reference was in
+    the Mailpit email body and the backend log
+  - Back from thank-you went to details, then to home
+  - backend with `FEATURED_PRODUCT_IDS=1,999,5,998,9`: "Showing 3 of 5 featured products"
+  - backend stopped: "Can't reach the catalogue" and "Categories couldn't be loaded"; after starting the
+    backend, both Retry buttons loaded categories and featured products
+- Not exercised on the emulator: the image-unavailable placeholder, TalkBack, and process death.
