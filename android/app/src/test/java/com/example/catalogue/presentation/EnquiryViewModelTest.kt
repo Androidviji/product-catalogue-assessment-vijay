@@ -8,6 +8,7 @@ import com.example.catalogue.domain.model.SubmitEnquiryResult
 import com.example.catalogue.domain.usecase.EnquiryValidator
 import com.example.catalogue.domain.usecase.SubmitEnquiryUseCase
 import com.example.catalogue.presentation.enquiry.EnquiryViewModel
+import com.example.catalogue.presentation.enquiry.SubmitProblem
 import com.example.catalogue.testing.FakeEnquiryRepository
 import com.example.catalogue.testing.MainDispatcherRule
 import kotlinx.coroutines.CompletableDeferred
@@ -80,14 +81,14 @@ class EnquiryViewModelTest {
 
     @Test
     fun `failure keeps the typed details and shows an error`() = runTest(main.dispatcher) {
-        repository.result = SubmitEnquiryResult.Failed(AppError.ServiceUnavailable("EMAIL_SEND_FAILED"))
+        repository.result = SubmitEnquiryResult.Failed(AppError.NoConnection)
         fillValidForm()
 
         vm.submit()
         advanceUntilIdle()
 
         val state = vm.state.value
-        assertEquals(AppError.ServiceUnavailable("EMAIL_SEND_FAILED"), state.submitError)
+        assertEquals(SubmitProblem.NotSent(AppError.NoConnection), state.submitProblem)
         assertEquals("Sam Lee", state.name)
         assertEquals("sam@example.com", state.email)
         assertEquals("Is this in stock?", state.message)
@@ -122,6 +123,40 @@ class EnquiryViewModelTest {
         vm.submit()
         advanceUntilIdle()
 
-        assertEquals(AppError.Server(418, null), vm.state.value.submitError)
+        assertEquals(SubmitProblem.NotSent(AppError.Server(418, null)), vm.state.value.submitProblem)
+    }
+
+    @Test
+    fun `unconfirmed outcome is not reported as not sent, and keeps the typed details`() = runTest(main.dispatcher) {
+        repository.result = SubmitEnquiryResult.Unconfirmed(AppError.Timeout)
+        fillValidForm()
+
+        vm.submit()
+        advanceUntilIdle()
+
+        val state = vm.state.value
+        assertEquals(SubmitProblem.Unconfirmed, state.submitProblem)
+        assertNull("no thank-you without confirmation", state.sentEnquiryId)
+        assertFalse(state.isSubmitting)
+        assertEquals("Sam Lee", state.name)
+        assertEquals("sam@example.com", state.email)
+        assertEquals("Is this in stock?", state.message)
+    }
+
+    @Test
+    fun `sending again after an unconfirmed outcome is the customer's explicit choice`() = runTest(main.dispatcher) {
+        repository.result = SubmitEnquiryResult.Unconfirmed(AppError.ConnectionLost)
+        fillValidForm()
+        vm.submit()
+        advanceUntilIdle()
+        assertEquals("nothing is resent automatically", 1, repository.submitted.size)
+
+        repository.result = SubmitEnquiryResult.Sent("ref-3")
+        vm.submit()
+        advanceUntilIdle()
+
+        assertEquals(2, repository.submitted.size)
+        assertEquals("ref-3", vm.state.value.sentEnquiryId)
+        assertNull(vm.state.value.submitProblem)
     }
 }

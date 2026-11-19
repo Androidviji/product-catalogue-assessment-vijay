@@ -24,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
@@ -113,21 +114,26 @@ private fun EnquiryForm(state: EnquiryUiState, productTitle: String, viewModel: 
         modifier = Modifier.fillMaxWidth(),
     )
 
-    state.submitError?.let { error ->
-        Spacer(Modifier.height(8.dp))
-        Card(
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.errorContainer,
-                contentColor = MaterialTheme.colorScheme.onErrorContainer,
+    when (val problem = state.submitProblem) {
+        null -> Unit
+        // Certain failure: safe to send again.
+        is SubmitProblem.NotSent -> ProblemCard(
+            title = "Your enquiry was not sent",
+            lines = listOf(problem.error.userMessage(), "Your details are still here. Tap Send enquiry to try again."),
+            containerColor = MaterialTheme.colorScheme.errorContainer,
+            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        )
+        // Unknown outcome: the email may already be with the sales team, so do not imply it failed.
+        SubmitProblem.Unconfirmed -> ProblemCard(
+            title = "We couldn't confirm your enquiry",
+            lines = listOf(
+                "Something went wrong before we could confirm whether your enquiry reached our " +
+                    "sales team. It may already have been sent.",
+                "Your details are still here. If you send it again, the sales team may receive it twice.",
             ),
-            modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite },
-        ) {
-            Column(Modifier.padding(16.dp)) {
-                Text("Your enquiry was not sent", style = MaterialTheme.typography.titleSmall)
-                Text(error.userMessage(), style = MaterialTheme.typography.bodyMedium)
-                Text("Your details are still here. Tap Send enquiry to try again.", style = MaterialTheme.typography.bodyMedium)
-            }
-        }
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+        )
     }
 
     Spacer(Modifier.height(16.dp))
@@ -142,7 +148,22 @@ private fun EnquiryForm(state: EnquiryUiState, productTitle: String, viewModel: 
                 Text("Sending…")
             }
         } else {
-            Text("Send enquiry")
+            // After an unconfirmed send, make it clear that tapping sends the enquiry again.
+            Text(if (state.submitProblem == SubmitProblem.Unconfirmed) "Send again" else "Send enquiry")
+        }
+    }
+}
+
+@Composable
+private fun ProblemCard(title: String, lines: List<String>, containerColor: Color, contentColor: Color) {
+    Spacer(Modifier.height(8.dp))
+    Card(
+        colors = CardDefaults.cardColors(containerColor = containerColor, contentColor = contentColor),
+        modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite },
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            lines.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
         }
     }
 }

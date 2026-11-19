@@ -215,3 +215,70 @@ Verification actually run:
   - backend stopped: "Can't reach the catalogue" and "Categories couldn't be loaded"; after starting the
     backend, both Retry buttons loaded categories and featured products
 - Not exercised on the emulator: the image-unavailable placeholder, TalkBack, and process death.
+
+## Stage 3 review fix: ambiguous enquiry failures
+
+- **Review finding (from the developer):** the enquiry screen said "Your enquiry was not sent" for every
+  failure and suggested retrying. After a timeout or a lost connection, the backend may already have
+  sent the email, so that message could be wrong, and a retry could create a duplicate.
+- **Change:**
+  - `safeApiCall` now separates `NoConnection` (never connected: unknown host, connection refused,
+    no route) from a new `ConnectionLost` (the connection broke after connecting).
+  - `SubmitEnquiryResult` gained `Unconfirmed`. `EnquiryRepositoryImpl` returns `Failed` only when
+    "not sent" is certain: no connection, any 4xx, or 503 `EMAIL_SEND_FAILED` /
+    `PRODUCT_SOURCE_UNAVAILABLE`. A timeout, `ConnectionLost`, an unreadable 200 or any other 5xx
+    returns `Unconfirmed`.
+  - The enquiry screen shows "We couldn't confirm your enquiry … may receive it twice", keeps the
+    fields, and labels the button "Send again".
+  - On the catalogue screens, `ConnectionLost` shows the same text as `NoConnection`.
+- **Decision:** a 503 without a known code, or a 502/504 from a proxy, is treated as unconfirmed rather
+  than "not sent". A gateway can time out while the backend is still sending the email.
+- **Checked, not assumed:** a test sends the enquiry to a server that drops the connection after
+  receiving the request. It asserts the server saw exactly one request, because OkHttp can retry
+  automatically on connection failures. It passed (1 request). Other failure modes were not tested for
+  automatic retries.
+- **Not implemented, documented as a future improvement:** an idempotency key sent with each enquiry
+  attempt, so the backend can ignore duplicates.
+- Result: `gradlew testDebugUnitTest`: 49 tests, 0 failures (8 new). The unconfirmed message was not
+  reproduced on the emulator.
+
+## Stage 3 review fix 2: conservative enquiry outcomes and OkHttp retries
+
+- **Review finding (from the developer):** `EMAIL_SEND_FAILED` does not prove that SMTP rejected the
+  message (the server may accept it before the backend misses the final acknowledgement), and a 4xx
+  does not prove the backend did not process the enquiry (a proxy may have generated it). The developer
+  also asked for a review of OkHttp's automatic retries for the enquiry POST.
+- **AI mistakes corrected:** both were the AI's choices in the previous fix.
+  - It had classified `EMAIL_SEND_FAILED` and every 4xx as "definitely not sent".
+  - Its earlier "POST reached the server exactly once" test only covered a fresh connection. That
+    happens not to retry, so it did not show retries were impossible in general.
+- **Evidence gathered:**
+  - Read `RetryAndFollowUpInterceptor`, `ExchangeFinder` and `OkHttpClient` from the OkHttp 4.12.0
+    sources jar on Maven Central (the version the build resolves). An `IOException` after the request
+    may have been sent is recovered when `retryOnConnectionFailure` is true, the body is not one-shot,
+    the error is not a `ProtocolException` or timeout, and `retryAfterFailure()` allows another
+    attempt. That includes a call made on a reused pooled connection.
+  - A new test reproduced this with the default client: the same POST was sent twice (3 requests).
+  - Run against the app as it was before this fix, the new enquiry test failed:
+    `expected Unconfirmed(ConnectionLost) but was Sent(should-not-be-used)`. The app had silently
+    resent the enquiry.
+- **Changes:**
+  - `AppContainer`: enquiries use `okHttpClient.newBuilder().retryOnConnectionFailure(false)`
+    through their own Retrofit instance. GETs keep automatic retries. A test covers each.
+  - `EnquiryRepositoryImpl`: "not sent" is now limited to two cases. First, never connected
+    (unknown host, refused, no route), which is valid only because retries are off. Second, our
+    backend's codes that occur before sending: `MALFORMED_REQUEST`, `UNSUPPORTED_MEDIA_TYPE`,
+    `PRODUCT_NOT_FOUND` and `PRODUCT_SOURCE_UNAVAILABLE`. That ordering was confirmed in
+    `EnquiryController` (`@Valid`) and `EnquiryService.submit` (product lookup at line 39, send at
+    line 50). Everything else is `Unconfirmed`, including `EMAIL_SEND_FAILED` and any bare 4xx/5xx.
+  - The unconfirmed message no longer claims "the connection was interrupted", since it now also
+    covers server responses.
+- **Remaining uncertainty (documented in README):**
+  - Retries by a proxy or load balancer in front of the backend.
+  - The customer choosing Send again.
+  - Connect timeouts are treated as unconfirmed even though nothing was sent.
+  - Many `EMAIL_SEND_FAILED` cases are real failures but cannot be told apart without a backend change.
+  - The idempotency key is still only a documented future improvement.
+- Result: `gradlew testDebugUnitTest`: 54 tests, 0 failures. `assembleDebug` and `lintDebug`
+  succeeded. Not checked on the emulator, which had been stopped earlier because the computer was low
+  on memory.

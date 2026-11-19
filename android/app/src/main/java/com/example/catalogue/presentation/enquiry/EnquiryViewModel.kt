@@ -13,6 +13,15 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+/** Why the last send did not end in a thank-you. */
+sealed interface SubmitProblem {
+    /** Certainly not sent (the backend said so, or it was never reached). Sending again is safe. */
+    data class NotSent(val error: AppError) : SubmitProblem
+
+    /** The app could not confirm the outcome: the enquiry may already have been sent. */
+    data object Unconfirmed : SubmitProblem
+}
+
 data class EnquiryUiState(
     val name: String = "",
     val email: String = "",
@@ -20,8 +29,8 @@ data class EnquiryUiState(
     val fieldErrors: Map<EnquiryField, String> = emptyMap(),
     /** True while a request is in flight: the Send button is disabled and further taps are ignored. */
     val isSubmitting: Boolean = false,
-    /** A failure that is not about one field (network, mail server down, unknown error). */
-    val submitError: AppError? = null,
+    /** A failure that is not about one field. Null while nothing has gone wrong. */
+    val submitProblem: SubmitProblem? = null,
     /** Set only after the backend confirmed the email was accepted. Shows the thank-you message. */
     val sentEnquiryId: String? = null,
 )
@@ -52,7 +61,7 @@ class EnquiryViewModel(
         if (current.isSubmitting || current.sentEnquiryId != null) return // no duplicate sends
 
         // Set synchronously, before the coroutine starts, so a quick second tap is ignored.
-        _state.update { it.copy(isSubmitting = true, submitError = null) }
+        _state.update { it.copy(isSubmitting = true, submitProblem = null) }
         viewModelScope.launch {
             val result = submitEnquiry(
                 Enquiry(productId, current.name, current.email, current.message),
@@ -63,9 +72,11 @@ class EnquiryViewModel(
                         it.copy(isSubmitting = false, fieldErrors = emptyMap(), sentEnquiryId = result.enquiryId)
                     is SubmitEnquiryResult.Invalid ->
                         it.copy(isSubmitting = false, fieldErrors = result.fieldErrors)
-                    // The typed values are untouched, so the customer can simply try again.
+                    // In both failure cases the typed values are untouched, so the customer can decide.
                     is SubmitEnquiryResult.Failed ->
-                        it.copy(isSubmitting = false, submitError = result.error)
+                        it.copy(isSubmitting = false, submitProblem = SubmitProblem.NotSent(result.error))
+                    is SubmitEnquiryResult.Unconfirmed ->
+                        it.copy(isSubmitting = false, submitProblem = SubmitProblem.Unconfirmed)
                 }
             }
         }

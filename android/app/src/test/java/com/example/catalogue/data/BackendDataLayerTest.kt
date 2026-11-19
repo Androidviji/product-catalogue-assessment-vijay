@@ -8,7 +8,10 @@ import com.example.catalogue.domain.model.EnquiryField
 import com.example.catalogue.domain.model.SubmitEnquiryResult
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.test.runTest
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.SocketPolicy
@@ -173,13 +176,146 @@ class BackendDataLayerTest {
         assertTrue(result is SubmitEnquiryResult.Failed)
     }
 
+    // --- OkHttp automatic retries ---------------------------------------------------
+
+    /**
+     * Evidence for the AppContainer change, not a test of our code: with OkHttp's default
+     * retryOnConnectionFailure = true, a POST written to a reused keep-alive connection that then
+     * drops is sent again on a new connection (RetryAndFollowUpInterceptor.recover, OkHttp 4.12.0).
+     */
     @Test
-    fun `email send failure keeps its code`() = runTest {
+    fun `default OkHttp client replays a POST when a reused connection drops after sending`() {
+        val client = OkHttpClient() // retryOnConnectionFailure defaults to true
+        server.enqueue(MockResponse().setBody("warm-up")) // leaves a pooled keep-alive connection
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST))
+        server.enqueue(MockResponse().setBody("second attempt"))
+
+        client.newCall(Request.Builder().url(server.url("/warm-up")).build()).execute().close()
+        val post = Request.Builder().url(server.url("/api/enquiries"))
+            .post("""{"x":1}""".toRequestBody("application/json".toMediaType())).build()
+        val body = client.newCall(post).execute().use { it.body!!.string() }
+
+        assertEquals("second attempt", body)
+        assertEquals("GET + the same POST twice", 3, server.requestCount)
+    }
+
+    @Test
+    fun `enquiry POST is not replayed when a reused connection drops after sending`() = runTest {
+        respond(200, """{"categories":["electronics"]}""") // warm-up GET leaves a pooled connection
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST))
+        respond(200, """{"enquiryId":"should-not-be-used","status":"SENT"}""")
+
+        assertTrue(container.getCategories() is DataResult.Success)
+        val result = container.submitEnquiry(enquiry)
+
+        assertEquals(SubmitEnquiryResult.Unconfirmed(AppError.ConnectionLost), result)
+        assertEquals("GET + the POST once", 2, server.requestCount)
+    }
+
+    @Test
+    fun `catalogue GETs keep OkHttp's automatic retry on a dropped reused connection`() = runTest {
+        respond(200, """{"categories":["electronics"]}""")
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST))
+        respond(200, """{"categories":["jewelery"]}""")
+
+        container.getCategories()
+        val second = container.getCategories()
+
+        assertEquals(DataResult.Success(listOf("jewelery")), second)
+        assertEquals(3, server.requestCount)
+    }
+
+    // --- enquiry outcome: definitely not sent vs. unconfirmed -----------------------
+
+    @Test
+    fun `connection dropped after the enquiry was sent is Unconfirmed, and is not silently resent`() = runTest {
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST))
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST))
+
+        val result = container.submitEnquiry(enquiry)
+
+        assertEquals(SubmitEnquiryResult.Unconfirmed(AppError.ConnectionLost), result)
+        assertEquals("the POST must reach the server exactly once", 1, server.requestCount)
+    }
+
+    @Test
+    fun `timeout waiting for the enquiry response is Unconfirmed`() = runTest {
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+
+        assertEquals(SubmitEnquiryResult.Unconfirmed(AppError.Timeout), container.submitEnquiry(enquiry))
+    }
+
+    @Test
+    fun `unexpected server or proxy error without a known code is Unconfirmed`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(502).setBody("<html>Bad gateway</html>"))
+        assertEquals(SubmitEnquiryResult.Unconfirmed(AppError.Server(502, null)), container.submitEnquiry(enquiry))
+
+        respond(500, """{"status":500,"code":"INTERNAL_ERROR"}""")
+        assertEquals(SubmitEnquiryResult.Unconfirmed(AppError.Server(500, "INTERNAL_ERROR")), container.submitEnquiry(enquiry))
+    }
+
+    @Test
+    fun `200 with an unreadable body is Unconfirmed, because the email was probably sent`() = runTest {
+        respond(200, """{"unexpected":true}""")
+
+        assertEquals(SubmitEnquiryResult.Unconfirmed(AppError.UnreadableResponse), container.submitEnquiry(enquiry))
+    }
+
+    @Test
+    fun `backend not reachable at all is definitely not sent`() = runTest {
+        val stopped = MockWebServer().apply { start() }
+        val url = stopped.url("/").toString()
+        stopped.shutdown()
+
+        assertEquals(
+            SubmitEnquiryResult.Failed(AppError.NoConnection),
+            AppContainer(url, fastClient).submitEnquiry(enquiry),
+        )
+    }
+
+    @Test
+    fun `our backend's pre-send error codes are definitely not sent`() = runTest {
+        respond(404, """{"status":404,"code":"PRODUCT_NOT_FOUND"}""")
+        assertEquals(SubmitEnquiryResult.Failed(AppError.NotFound("PRODUCT_NOT_FOUND")), container.submitEnquiry(enquiry))
+
+        respond(503, """{"status":503,"code":"PRODUCT_SOURCE_UNAVAILABLE"}""")
+        assertEquals(
+            SubmitEnquiryResult.Failed(AppError.ServiceUnavailable("PRODUCT_SOURCE_UNAVAILABLE")),
+            container.submitEnquiry(enquiry),
+        )
+
+        respond(400, """{"status":400,"code":"MALFORMED_REQUEST"}""")
+        assertEquals(SubmitEnquiryResult.Failed(AppError.Server(400, "MALFORMED_REQUEST")), container.submitEnquiry(enquiry))
+
+        respond(415, """{"status":415,"code":"UNSUPPORTED_MEDIA_TYPE"}""")
+        assertEquals(SubmitEnquiryResult.Failed(AppError.Server(415, "UNSUPPORTED_MEDIA_TYPE")), container.submitEnquiry(enquiry))
+    }
+
+    @Test
+    fun `EMAIL_SEND_FAILED is Unconfirmed, because SMTP may have accepted the message before failing`() = runTest {
         respond(503, """{"status":503,"code":"EMAIL_SEND_FAILED","detail":"Your enquiry could not be sent right now."}""")
 
         assertEquals(
-            SubmitEnquiryResult.Failed(AppError.ServiceUnavailable("EMAIL_SEND_FAILED")),
+            SubmitEnquiryResult.Unconfirmed(AppError.ServiceUnavailable("EMAIL_SEND_FAILED")),
             container.submitEnquiry(enquiry),
         )
+    }
+
+    @Test
+    fun `4xx without one of our pre-send codes is Unconfirmed, because a proxy may have sent it`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(408).setBody("<html>Request Timeout</html>"))
+        assertEquals(SubmitEnquiryResult.Unconfirmed(AppError.Server(408, null)), container.submitEnquiry(enquiry))
+
+        respond(429, """{"status":429,"code":"RATE_LIMITED"}""")
+        assertEquals(SubmitEnquiryResult.Unconfirmed(AppError.Server(429, "RATE_LIMITED")), container.submitEnquiry(enquiry))
+
+        server.enqueue(MockResponse().setResponseCode(404).setBody("Not Found"))
+        assertEquals(SubmitEnquiryResult.Unconfirmed(AppError.NotFound(null)), container.submitEnquiry(enquiry))
+    }
+
+    @Test
+    fun `5xx without one of our pre-send codes is Unconfirmed`() = runTest {
+        respond(503, """{"status":503}""")
+        assertEquals(SubmitEnquiryResult.Unconfirmed(AppError.ServiceUnavailable(null)), container.submitEnquiry(enquiry))
     }
 }

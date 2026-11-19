@@ -72,7 +72,8 @@ cd android
 | Details | Tap a product | Image (loaded through `/api/products/{id}/image`), price, rating, category, description |
 | Enquiry validation | **Enquire about this product**, tap **Send enquiry** empty, then with email `abc` | Messages under the name and email fields; nothing sent |
 | Enquiry success | Fill in name, a valid email and an optional message, then **Send enquiry** | Button shows "Sending…" and is disabled; then "Thank you, …" with a reference. The email appears in Mailpit with the same reference |
-| Enquiry failure | Stop the backend, restart it with `$env:SMTP_PORT = "1"`, send again | "Your enquiry was not sent…"; every field keeps its text. Restart the backend normally and tap **Send enquiry** again to succeed |
+| Enquiry failure (unconfirmed) | Stop the backend, restart it with `$env:SMTP_PORT = "1"`, send again | "We couldn't confirm your enquiry… may receive it twice"; every field keeps its text; button reads **Send again**. `EMAIL_SEND_FAILED` is treated as unconfirmed (see Enquiry flow). Restart the backend normally and tap **Send again** to succeed |
+| Enquiry not sent | Stop the backend completely, send | "Your enquiry was not sent"; fields kept |
 | Network failure + retry | Stop the backend, reopen the app | "Can't reach the catalogue…" or "taking too long…" with **Retry**; start the backend and tap Retry |
 | Back / rotation | Use system Back and the top-bar arrow; rotate on the enquiry form | Normal back stack; typed text and results survive rotation |
 
@@ -94,7 +95,8 @@ The Android unit tests cover:
 - ViewModels: loading, content, error and retry states; search only on the button; enquiry success and
   failure, duplicate taps, and server field errors
 - the real data layer against MockWebServer: DTO mapping, URL encoding of `men's clothing`, problem-details
-  error codes, unknown codes, non-JSON errors, timeouts and connection refused
+  error codes, unknown codes, non-JSON errors, timeouts and connection refused, and which enquiry
+  failures count as "not sent" and which as "unconfirmed"
 
 There are no instrumented or Compose UI tests; the UI was checked manually on the emulator.
 
@@ -144,9 +146,38 @@ Why each piece exists:
    taps. Then `SubmitEnquiryUseCase` runs.
 3. The use case validates with `EnquiryValidator` (the same rules as the backend). Invalid input returns
    `Invalid(fieldErrors)` without a request.
-4. `EnquiryRepositoryImpl` POSTs `api/enquiries`. A 200 response returns `Sent(enquiryId)`. A 400
-   `VALIDATION_FAILED` maps the backend's field names to form fields. Anything else is
-   `Failed(AppError)`.
+4. `EnquiryRepositoryImpl` POSTs `api/enquiries` and turns the answer into one of four outcomes:
+
+   | Outcome | When | What the customer sees |
+   |---|---|---|
+   | `Sent(enquiryId)` | 200 with a reference | Thank-you message |
+   | `Invalid(fieldErrors)` | 400 `VALIDATION_FAILED` for name, email or message | Messages under the fields |
+   | `Failed(error)`: definitely not sent | (a) The app never connected (unknown host, connection refused, no route), or (b) the response carries one of our backend's codes that it returns **before** trying to send: `MALFORMED_REQUEST`, `UNSUPPORTED_MEDIA_TYPE`, `PRODUCT_NOT_FOUND`, `PRODUCT_SOURCE_UNAVAILABLE` | "Your enquiry was not sent", and Send enquiry to try again |
+   | `Unconfirmed(error)`: outcome unknown | Everything else, including `EMAIL_SEND_FAILED`, any 4xx/5xx without one of those codes (e.g. from a proxy), a timeout, a connection that dropped after connecting, or a 200 whose body can't be read | "We couldn't confirm your enquiry… It may already have been sent… may receive it twice", and the button reads **Send again** |
+
+   The rule: the app only says "not sent" when it has a concrete reason to be sure.
+   - **Never connected:** no request bytes left the device. This relies on the enquiry client having
+     OkHttp's automatic retries turned off (see below), so no earlier attempt can have sent the request.
+   - **Pre-send codes:** the backend checks the JSON body and content type, runs `@Valid`, and looks up
+     the product, all before `EnquiryService` calls the email sender. A response carrying one of those
+     codes therefore means our backend stopped before sending. A bare status code proves nothing,
+     because a proxy can also return 4xx or 5xx.
+   - **`EMAIL_SEND_FAILED` is unconfirmed:** the backend did attempt SMTP. The mail server may have
+     accepted the message, and then the connection failed before the backend received the final
+     acknowledgement.
+   - **Timeouts and dropped connections are unconfirmed:** they can happen after the email was sent.
+
+   In both failure cases every typed field is kept, and nothing is resent automatically; sending again
+   is the customer's choice.
+
+   **Automatic retries:** OkHttp's default `retryOnConnectionFailure = true` can silently resend a request
+   whose connection failed after it was written. In OkHttp 4.12.0 source
+   (`RetryAndFollowUpInterceptor`), such an `IOException` is recovered when the body is not one-shot
+   (Retrofit bodies are not) and another route is available, which includes a reused keep-alive
+   connection. A unit test reproduced it: the default client sent the same POST twice. Enquiries therefore
+   use a client derived from the shared one with `retryOnConnectionFailure(false)`, which shares the
+   connection pool. Catalogue GETs keep automatic retries, because repeating a read is harmless. Tests
+   cover both.
 5. The thank-you view is shown only for `Sent`, which the backend returns only after the SMTP server has
    accepted the email.
 
@@ -167,6 +198,25 @@ Why each piece exists:
 
 ## Known limitations and assumptions
 
+- **Duplicate enquiries are possible, but not prevented.** After an unconfirmed outcome, the app warns
+  the customer that sending again may create a duplicate; it does not stop one.
+  - **Possible future improvement (not implemented):** an idempotency key. The app would create a random
+    key (UUID) when the form is first submitted, keep it while the form is open, and send it with every
+    attempt (for example in an `Idempotency-Key` header). The backend would remember recently used keys,
+    and for a repeated key return the original result instead of emailing again. That needs storage shared
+    by all backend instances, with an expiry, which is beyond this PoC.
+  - OkHttp no longer replays enquiry POSTs (see the enquiry flow above). Duplicates can still come from
+    the customer choosing **Send again** after an unconfirmed outcome, or from any proxy or load balancer
+    in front of the backend that retries requests itself; the app cannot see or prevent that.
+  - Many `EMAIL_SEND_FAILED` responses are certain failures, such as the SMTP server being unreachable,
+    but the backend returns the same code for every SMTP error, so the app must treat them all as
+    unconfirmed. A possible backend improvement (not implemented) is a separate code for failures before
+    any message data was sent.
+  - A connect timeout (`SocketTimeoutException` while connecting) is also treated as unconfirmed,
+    although nothing was sent. OkHttp reports it the same way as a read timeout, and telling them apart
+    would rely on exception messages.
+  - The new "unconfirmed" and "not sent" messages are covered by unit tests only. They have not been
+    checked on the emulator since this change. The table above lists how to trigger each one manually.
 - **No caching or offline mode.** Every screen fetches fresh data. Coil caches images in memory and on disk.
 - **Process death:** ViewModels are not backed by `SavedStateHandle`.
   - After the system kills the app in the background, the navigation back stack and route arguments (for

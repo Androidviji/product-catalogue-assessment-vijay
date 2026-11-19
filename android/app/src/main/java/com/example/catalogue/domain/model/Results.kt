@@ -12,8 +12,11 @@ sealed interface DataResult<out T> {
  * one was sent; it may be null or a code this app does not know, and the UI must cope.
  */
 sealed interface AppError {
-    /** Could not reach the backend (offline, wrong address, backend not running). */
+    /** Could not connect to the backend (offline, wrong address, backend not running). Nothing was sent. */
     data object NoConnection : AppError
+
+    /** Connected, but the connection broke before a full response arrived. The request may have been processed. */
+    data object ConnectionLost : AppError
 
     /** The backend did not answer in time. */
     data object Timeout : AppError

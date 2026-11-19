@@ -8,7 +8,7 @@ import com.example.catalogue.domain.model.AppError
  * (English only; see README limitations.)
  */
 fun AppError.userMessage(): String = when (this) {
-    AppError.NoConnection ->
+    AppError.NoConnection, AppError.ConnectionLost ->
         "Can't reach the catalogue. Check your connection and try again."
     AppError.Timeout ->
         "The catalogue is taking too long to respond. Please try again."
@@ -17,10 +17,8 @@ fun AppError.userMessage(): String = when (this) {
         "CATEGORY_NOT_FOUND" -> "This category has no products right now."
         else -> "We couldn't find what you were looking for."
     }
-    is AppError.ServiceUnavailable -> when (code) {
-        "EMAIL_SEND_FAILED" -> "We couldn't send your enquiry right now. Please try again in a few minutes."
-        else -> "Products are temporarily unavailable. Please try again shortly."
-    }
+    // EMAIL_SEND_FAILED is shown as "couldn't confirm" by the enquiry screen, not through this text.
+    is AppError.ServiceUnavailable -> "Products are temporarily unavailable. Please try again shortly."
     is AppError.Validation ->
         "Some details weren't accepted. Please check the form and try again."
     is AppError.Server ->

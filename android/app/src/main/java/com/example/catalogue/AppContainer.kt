@@ -36,15 +36,28 @@ class AppContainer(
         explicitNulls = false    // an absent optional message is omitted, not sent as null
     }
 
-    private val api: CatalogueApi = Retrofit.Builder()
+    private val retrofit: Retrofit = Retrofit.Builder()
         .baseUrl(baseUrl)
         .client(okHttpClient)
         .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
         .build()
+
+    /** Catalogue reads (GETs). OkHttp may retry these after a connection failure, which is harmless. */
+    private val api: CatalogueApi = retrofit.create(CatalogueApi::class.java)
+
+    /**
+     * Enquiries (POST) must never be sent twice by OkHttp itself. With the default
+     * retryOnConnectionFailure = true, OkHttp resends a request whose connection fails after it was
+     * written (for example a stale keep-alive connection), which could email the sales team twice.
+     * newBuilder() shares the connection pool and threads; only the retry setting differs.
+     */
+    private val enquiryApi: CatalogueApi = retrofit.newBuilder()
+        .client(okHttpClient.newBuilder().retryOnConnectionFailure(false).build())
+        .build()
         .create(CatalogueApi::class.java)
 
     private val catalogueRepository: CatalogueRepository = CatalogueRepositoryImpl(api, baseUrl, json)
-    private val enquiryRepository: EnquiryRepository = EnquiryRepositoryImpl(api, json)
+    private val enquiryRepository: EnquiryRepository = EnquiryRepositoryImpl(enquiryApi, json)
 
     val getFeaturedProducts = GetFeaturedProductsUseCase(catalogueRepository)
     val getCategories = GetCategoriesUseCase(catalogueRepository)

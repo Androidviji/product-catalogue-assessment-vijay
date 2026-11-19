@@ -55,6 +55,16 @@ sealed interface SubmitEnquiryResult {
     /** One or more fields are invalid (found by the app's own checks or by the backend). */
     data class Invalid(val fieldErrors: Map<EnquiryField, String>) : SubmitEnquiryResult
 
-    /** Not sent for another reason (network, server, unknown error). The form should be kept. */
+    /**
+     * Definitely not sent: the backend said so (e.g. EMAIL_SEND_FAILED), or the app could not connect at all.
+     * Sending again is safe. The form should be kept.
+     */
     data class Failed(val error: AppError) : SubmitEnquiryResult
+
+    /**
+     * Unknown outcome: the request may have reached the backend, but no reliable answer came back
+     * (timeout, connection dropped, unexpected server error). The email may or may not have been sent,
+     * so sending again could create a duplicate. The form should be kept and the customer told.
+     */
+    data class Unconfirmed(val error: AppError) : SubmitEnquiryResult
 }
