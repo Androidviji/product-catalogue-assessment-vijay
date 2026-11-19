@@ -1,12 +1,27 @@
 # Product Catalogue Assessment
 
-A product catalogue proof of concept:
+A product catalogue proof of concept. Customers browse featured products and categories, search, view
+product details and send an enquiry that is emailed to a sales inbox.
 
 - **`backend/`**: Java 21 + Spring Boot. Serves products from the Fake Store API and emails customer
   enquiries over SMTP. Its API, configuration and limitations are in [`backend/README.md`](backend/README.md).
-- **`android/`**: Kotlin + Jetpack Compose app (MVVM, practical Clean Architecture). It only talks to the backend.
+- **`android/`**: Kotlin + Jetpack Compose app (MVVM, practical Clean Architecture). It only talks to the
+  backend; it never calls Fake Store, not even for images.
 - **`docker-compose.yml`**: Mailpit, a local test inbox for enquiry emails.
-- **`docs/ai-log.md`**: notes on how AI assistance was used.
+- **[`DECISIONS.md`](DECISIONS.md)**: assumptions, simplifications, how the design can grow, known
+  limitations, and what's next.
+- **[`AI_USAGE.md`](AI_USAGE.md)**: how AI tools were used, key moments, and AI mistakes caught.
+  The raw notes made during the build are in `docs/ai-log.md`.
+
+## Technology choice
+
+- **Client: Android app in Kotlin** (Jetpack Compose, MVVM). This assessment is for a Senior Android
+  Engineer role.
+- **Backend: Java 21 + Spring Boot.** The brief lists Node.js and PHP/Laravel. I received a clarification
+  from Officeworks approving Java Spring Boot for the backend, and built on that basis.
+
+Configuration uses environment variables, listed with their defaults in [`.env.example`](.env.example).
+No secrets, accounts or paid services are needed; the defaults work as-is.
 
 ```
 Android app  --HTTP-->  backend (localhost:8080)  --HTTPS-->  fakestoreapi.com (products, images)
@@ -15,9 +30,15 @@ Android app  --HTTP-->  backend (localhost:8080)  --HTTPS-->  fakestoreapi.com (
 
 ## Prerequisites (Windows)
 
-- JDK 21, Docker Desktop, Android Studio with Android SDK 37 and an emulator (the app was tested on an
-  API 37 "Medium Phone" emulator).
-- Internet access while running, for fakestoreapi.com.
+- **JDK 21** (`java -version`). Maven isn't needed; the backend uses the Maven wrapper.
+- **Docker Desktop**, for Mailpit.
+- **Android Studio** recent enough for Android Gradle Plugin 9.5.1, with **Android SDK Platform 37**
+  (compileSdk/targetSdk 37) and an emulator. The app supports Android 8.0+ (minSdk 26). It was tested on
+  an API 37 "Medium Phone" emulator.
+- **Internet access** while running (fakestoreapi.com, and the first Maven and Gradle downloads).
+
+The first backend build and the first Android Gradle sync download dependencies, so they take longest.
+Setup time hasn't been measured on a clean machine.
 
 ## Run everything end to end
 
@@ -29,6 +50,12 @@ docker compose up -d mailpit
 
 Open http://localhost:8025 and leave it open. If another Mailpit container already uses ports 1025/8025,
 use that one instead; the backend only needs something listening on localhost:1025.
+
+> **Mailpit only captures email locally.** It accepts every message the backend sends over SMTP and shows
+> it at http://localhost:8025, but it **never delivers anything to a real external mailbox**. The default
+> sales inbox, `sales@officeworks.test`, is not a real address. Delivering to a real sales mailbox needs a
+> real SMTP provider, configured with the `SMTP_*` and `ENQUIRY_*` environment variables
+> (see [`backend/README.md`](backend/README.md#configuration)).
 
 **2. Start the backend** (a second PowerShell window):
 
@@ -62,20 +89,24 @@ cd android
 
 ## Try it end to end
 
-| Feature | Steps | Expected |
-|---|---|---|
-| Home | Launch the app | Search box, four category chips, five featured products with images |
-| Missing featured products | Restart the backend with `$env:FEATURED_PRODUCT_IDS = "1,999,5,998,9"`, reopen the app | Yellow notice "Showing 3 of 5 featured products. Some are unavailable right now." plus the 3 products |
-| Category | Tap **Men's clothing** | "Top rated" (3 products) and "More in Men's clothing" (the rest); no product appears twice |
-| Search | Type `backpack`, tap **Search** | "1 result for "backpack"". Typing alone does not search |
-| Search: no match / blank | Search `bicycle`; then clear the box and tap **Search** | "No products match…"; "Enter a product name…" under the box, with no request sent |
-| Details | Tap a product | Image (loaded through `/api/products/{id}/image`), price, rating, category, description |
-| Enquiry validation | **Enquire about this product**, tap **Send enquiry** empty, then with email `abc` | Messages under the name and email fields; nothing sent |
-| Enquiry success | Fill in name, a valid email and an optional message, then **Send enquiry** | Button shows "Sending…" and is disabled; then "Thank you, …" with a reference. The email appears in Mailpit with the same reference |
-| Enquiry failure (unconfirmed) | Stop the backend, restart it with `$env:SMTP_PORT = "1"`, send again | "We couldn't confirm your enquiry… may receive it twice"; every field keeps its text; button reads **Send again**. `EMAIL_SEND_FAILED` is treated as unconfirmed (see Enquiry flow). Restart the backend normally and tap **Send again** to succeed |
-| Enquiry not sent | Stop the backend completely, send | "Your enquiry was not sent"; fields kept |
-| Network failure + retry | Stop the backend, reopen the app | "Can't reach the catalogue…" or "taking too long…" with **Retry**; start the backend and tap Retry |
-| Back / rotation | Use system Back and the top-bar arrow; rotate on the enquiry form | Normal back stack; typed text and results survive rotation |
+The critical user journey is **Home → Category → Product → Enquire → Thank you → the email in Mailpit**,
+plus **Search**. The last column says what was actually checked by hand on the API 37 emulator, against
+the local backend and Mailpit. Those checks were done before the last two enquiry-outcome changes.
+
+| Feature | Steps | Expected | Checked on the emulator? |
+|---|---|---|---|
+| Home | Launch the app | Search box, four category chips, five featured products with images | Yes |
+| Missing featured products | Restart the backend with `$env:FEATURED_PRODUCT_IDS = "1,999,5,998,9"`, reopen the app | Yellow notice "Showing 3 of 5 featured products. Some are unavailable right now." plus the 3 products | Yes |
+| Category | Tap **Men's clothing** | "Top rated" (3 products) and "More in Men's clothing" (the rest); no product appears twice | Yes |
+| Search | Type `backpack`, tap **Search** | "1 result for "backpack"". Typing alone does not search | Yes |
+| Search: no match / blank | Search `bicycle`; then clear the box and tap **Search** | "No products match…"; "Enter a product name…" under the box, with no request sent | Yes |
+| Details | Tap a product | Image (loaded through `/api/products/{id}/image`), price, rating, category, description | Yes |
+| Enquiry validation | **Enquire about this product**, tap **Send enquiry** empty, then with email `abc` | Messages under the name and email fields; nothing sent | Yes |
+| Enquiry success | Fill in name, a valid email and an optional message, then **Send enquiry** | "Thank you, …" with a reference. The email appears in Mailpit with the same reference | Yes: thank-you shown, email seen in Mailpit with matching reference |
+| Enquiry: couldn't confirm | Stop the backend, restart it with `$env:SMTP_PORT = "1"`, then send | "We couldn't confirm your enquiry… may receive it twice"; fields kept; button reads **Send again**. Restart the backend normally and tap **Send again** to succeed | **No.** The same steps were run before this message existed (it then said "not sent"); the current message is covered by unit tests only |
+| Enquiry: not sent | Open the enquiry form, stop the backend completely, then send | "Your enquiry was not sent"; fields kept | **No.** Unit tests only |
+| Network failure + retry | Stop the backend, reopen the app; start the backend, tap **Retry** | "Can't reach the catalogue…" with **Retry**, then content loads | Yes |
+| Back / rotation | Use system Back and the in-app back buttons; rotate on the enquiry form | Normal back stack; typed text survives rotation | Yes: system Back from category, details and search; the thank-you screen's **Back to product** button; rotation on the enquiry form only |
 
 ## Tests
 
@@ -167,8 +198,8 @@ Why each piece exists:
      acknowledgement.
    - **Timeouts and dropped connections are unconfirmed:** they can happen after the email was sent.
 
-   In both failure cases every typed field is kept, and nothing is resent automatically; sending again
-   is the customer's choice.
+   In both failure cases every typed field is kept. The app itself does not resend the enquiry: sending
+   again is the customer's choice.
 
    **Automatic retries:** OkHttp's default `retryOnConnectionFailure = true` can silently resend a request
    whose connection failed after it was written. In OkHttp 4.12.0 source
@@ -178,6 +209,15 @@ Why each piece exists:
    use a client derived from the shared one with `retryOnConnectionFailure(false)`, which shares the
    connection pool. Catalogue GETs keep automatic retries, because repeating a read is harmless. Tests
    cover both.
+
+   This turns off one known replay path; it does **not** make a duplicate request impossible:
+   - **Redirects:** OkHttp's redirect following is still at its default. The backend doesn't redirect
+     enquiries, so this wasn't tested.
+   - **Intermediaries:** a proxy or load balancer between the app and the backend could retry on its own.
+   - **The customer:** they can tap **Send again** after a "couldn't confirm" outcome.
+
+   An idempotency key would handle all of these; it is listed as a next step in
+   [`DECISIONS.md`](DECISIONS.md#what-id-do-next-with-another-day).
 5. The thank-you view is shown only for `Sent`, which the backend returns only after the SMTP server has
    accepted the email.
 
@@ -196,43 +236,22 @@ Why each piece exists:
 - **A physical phone** cannot use `10.0.2.2`. Change the debug base URL to your computer's LAN IP, and add
   it to the debug network security config.
 
-## Known limitations and assumptions
+## Assumptions and known limitations
 
-- **Duplicate enquiries are possible, but not prevented.** After an unconfirmed outcome, the app warns
-  the customer that sending again may create a duplicate; it does not stop one.
-  - **Possible future improvement (not implemented):** an idempotency key. The app would create a random
-    key (UUID) when the form is first submitted, keep it while the form is open, and send it with every
-    attempt (for example in an `Idempotency-Key` header). The backend would remember recently used keys,
-    and for a repeated key return the original result instead of emailing again. That needs storage shared
-    by all backend instances, with an expiry, which is beyond this PoC.
-  - OkHttp no longer replays enquiry POSTs (see the enquiry flow above). Duplicates can still come from
-    the customer choosing **Send again** after an unconfirmed outcome, or from any proxy or load balancer
-    in front of the backend that retries requests itself; the app cannot see or prevent that.
-  - Many `EMAIL_SEND_FAILED` responses are certain failures, such as the SMTP server being unreachable,
-    but the backend returns the same code for every SMTP error, so the app must treat them all as
-    unconfirmed. A possible backend improvement (not implemented) is a separate code for failures before
-    any message data was sent.
-  - A connect timeout (`SocketTimeoutException` while connecting) is also treated as unconfirmed,
-    although nothing was sent. OkHttp reports it the same way as a read timeout, and telling them apart
-    would rely on exception messages.
-  - The new "unconfirmed" and "not sent" messages are covered by unit tests only. They have not been
-    checked on the emulator since this change. The table above lists how to trigger each one manually.
-- **No caching or offline mode.** Every screen fetches fresh data. Coil caches images in memory and on disk.
-- **Process death:** ViewModels are not backed by `SavedStateHandle`.
-  - After the system kills the app in the background, the navigation back stack and route arguments (for
-    example the search query) are restored, and data reloads.
-  - Text typed into the enquiry form, and a search box edited after the search, are lost.
-- **English only.** UI text is in Kotlin code, not `strings.xml`, to keep the PoC compact. Localisation
-  would move it to resources.
-- **Prices** are formatted as AUD with an `en-AU` locale. Fake Store prices have no currency, so this is
-  an assumption.
-- **Not all states were exercised on the emulator.** The image-unavailable placeholder was not seen,
-  because every Fake Store image loaded; it is implemented with Coil's error slot. TalkBack was not run,
-  although the semantics were checked through UI Automator dumps.
-- **Search** submits from the Search button or the keyboard's Search key; both are explicit submits, and
-  nothing searches while typing.
-- **Featured notice:** when the backend reports missing featured products, the app says how many are shown
-  out of how many were configured. It does not show the missing IDs, which mean nothing to a customer; the
-  backend logs them.
-- **Dependency versions** were chosen for compatibility with Kotlin 2.2.10 and AGP 9.5.1, as used by the
-  installed Android Studio template. Lint reports newer versions (warnings only).
+These are in [`DECISIONS.md`](DECISIONS.md): assumptions about the acceptance criteria (featured products,
+category ranking, search, currency), simplifications and why, how the product source, UI and email
+provider can change, known limitations (including possible duplicate enquiries and process-death state
+loss) and what's next.
+
+## Time spent
+
+**Total: approximately 4 hours**, against the brief's 2–3 hour time-box.
+
+> **TODO (author): fill in the breakdown before submitting. These are placeholders, not estimates.**
+>
+> | Activity | Approximate time |
+> |---|---|
+> | Planning | _TBD_ |
+> | Building | _TBD_ |
+> | Testing | _TBD_ |
+> | Review | _TBD_ |

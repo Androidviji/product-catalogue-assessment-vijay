@@ -64,8 +64,10 @@ SMTP connect, read and write timeouts are 5 seconds each.
 
 ## API
 
-Errors from `/api/...` use the same JSON shape ([RFC 9457 problem details](https://www.rfc-editor.org/rfc/rfc9457))
-and always include a `code` the app can switch on. Error responses never contain stack traces, internal
+Errors from `/api/...` use the same JSON shape ([RFC 9457 problem details](https://www.rfc-editor.org/rfc/rfc9457)).
+Application errors and common framework errors handled by the controller advice (`ApiExceptionHandler`)
+include a `code` the app can switch on. Errors handled outside that advice may not include a `code`; the
+Android app shows a generic fallback message when the code is missing. Error responses never contain stack traces, internal
 messages or upstream URLs, and our own messages never echo request values (Spring's default 404 detail does name the requested path).
 
 ```json
