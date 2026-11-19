@@ -20,6 +20,8 @@ import org.springframework.web.client.RestClient;
 
 class FakeStoreProductSourceTest {
 
+    private static final String BASE_URL = "https://fakestore.test";
+
     private static final String FAKE_STORE_JSON = """
             [
               {
@@ -42,7 +44,7 @@ class FakeStoreProductSourceTest {
         server.expect(requestTo("https://fakestore.test/products"))
                 .andRespond(withSuccess(FAKE_STORE_JSON, MediaType.APPLICATION_JSON));
 
-        List<Product> products = new FakeStoreProductSource(builder.build()).findAll();
+        List<Product> products = new FakeStoreProductSource(builder.build(), BASE_URL).findAll();
 
         assertThat(products).containsExactly(new Product(1, "Backpack", new BigDecimal("109.95"), "A backpack",
                 "men's clothing", "https://fakestoreapi.com/img/1.png", 3.9, 120));
@@ -55,7 +57,7 @@ class FakeStoreProductSourceTest {
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         server.expect(requestTo("https://fakestore.test/products")).andRespond(withServerError());
 
-        FakeStoreProductSource source = new FakeStoreProductSource(builder.build());
+        FakeStoreProductSource source = new FakeStoreProductSource(builder.build(), BASE_URL);
 
         assertThatThrownBy(source::findAll).isInstanceOf(ProductSourceUnavailableException.class);
     }
@@ -67,7 +69,7 @@ class FakeStoreProductSourceTest {
         server.expect(requestTo("https://fakestore.test/products"))
                 .andRespond(withSuccess("<html>not json</html>", MediaType.APPLICATION_JSON));
 
-        FakeStoreProductSource source = new FakeStoreProductSource(builder.build());
+        FakeStoreProductSource source = new FakeStoreProductSource(builder.build(), BASE_URL);
 
         assertThatThrownBy(source::findAll).isInstanceOf(ProductSourceUnavailableException.class);
     }
@@ -87,7 +89,7 @@ class FakeStoreProductSourceTest {
             FakeStoreProperties properties = new FakeStoreProperties(
                     "http://127.0.0.1:" + silentServer.getLocalPort(), Duration.ofSeconds(1), Duration.ofMillis(300));
             FakeStoreProductSource source = new FakeStoreProductSource(
-                    FakeStoreProductSource.createRestClient(properties, RestClient.builder()));
+                    FakeStoreProductSource.createRestClient(properties, RestClient.builder()), properties.baseUrl());
 
             long start = System.nanoTime();
             assertThatThrownBy(source::findAll).isInstanceOf(ProductSourceUnavailableException.class);

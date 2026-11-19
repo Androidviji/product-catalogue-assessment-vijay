@@ -25,6 +25,18 @@
 			<artifactId>spring-boot-starter-webmvc</artifactId>
 		</dependency>
 
+		<!-- Bean Validation (@NotBlank, @Email, ...) for the enquiry request -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-validation</artifactId>
+		</dependency>
+
+		<!-- JavaMailSender (SMTP) for enquiry emails; Mailpit locally -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-mail</artifactId>
+		</dependency>
+
 		<!-- JUnit 5, AssertJ, Mockito, MockMvc, MockRestServiceServer -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>

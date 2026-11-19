@@ -3,6 +3,8 @@ package com.example.catalogue.product;
 import static com.example.catalogue.product.TestProducts.product;
 import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -22,6 +24,9 @@ class ProductControllerTest {
 
     @MockitoBean
     private CatalogueService catalogueService;
+
+    @MockitoBean
+    private ProductImageService imageService;
 
     @Test
     void returnsFeaturedProductsInOurOwnContract() throws Exception {
@@ -71,5 +76,118 @@ class ProductControllerTest {
                         throw new AssertionError("Response leaked internal details: " + body);
                     }
                 });
+    }
+
+    // --- product details ---------------------------------------------------
+
+    @Test
+    void returnsASingleProduct() throws Exception {
+        given(catalogueService.getProduct(3)).willReturn(product(3));
+
+        mockMvc.perform(get("/api/products/3"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(3))
+                .andExpect(jsonPath("$.title").value("Product 3"))
+                .andExpect(jsonPath("$.sourceImageUrl").doesNotExist());
+    }
+
+    @Test
+    void unknownProductReturns404Problem() throws Exception {
+        given(catalogueService.getProduct(999)).willThrow(new ProductNotFoundException(999));
+
+        mockMvc.perform(get("/api/products/999"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("PRODUCT_NOT_FOUND"))
+                .andExpect(jsonPath("$.detail").value("No product exists with ID 999."));
+    }
+
+    @Test
+    void nonNumericProductIdReturns400() throws Exception {
+        mockMvc.perform(get("/api/products/abc"))
+                .andExpect(status().isBadRequest());
+    }
+
+    // --- search --------------------------------------------------------------
+
+    @Test
+    void searchReturnsTrimmedQueryAndMatches() throws Exception {
+        given(catalogueService.search("  ssd ")).willReturn(List.of(product(3)));
+
+        mockMvc.perform(get("/api/products/search").param("q", "  ssd "))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.query").value("ssd"))
+                .andExpect(jsonPath("$.products.length()").value(1))
+                .andExpect(jsonPath("$.products[0].id").value(3));
+    }
+
+    @Test
+    void searchWithNoMatchesReturnsEmptyList() throws Exception {
+        given(catalogueService.search("bicycle")).willReturn(List.of());
+
+        mockMvc.perform(get("/api/products/search").param("q", "bicycle"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.products").isEmpty());
+    }
+
+    @Test
+    void blankOrMissingSearchReturns400() throws Exception {
+        given(catalogueService.search(null)).willThrow(new InvalidSearchQueryException("Enter some text to search for."));
+
+        mockMvc.perform(get("/api/products/search"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_SEARCH_QUERY"))
+                .andExpect(jsonPath("$.detail").value("Enter some text to search for."));
+    }
+
+    // --- image ---------------------------------------------------------------
+
+    @Test
+    void imageReturnsBytesWithContentTypeAndCacheHeaders() throws Exception {
+        byte[] png = {(byte) 0x89, 'P', 'N', 'G'};
+        given(imageService.getImage(1)).willReturn(new ProductImage(png, "image/png"));
+
+        mockMvc.perform(get("/api/products/1/image"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType("image/png"))
+                .andExpect(content().bytes(png))
+                .andExpect(header().string("Cache-Control", "max-age=3600"))
+                .andExpect(header().string("X-Content-Type-Options", "nosniff"));
+    }
+
+    @Test
+    void imageForUnknownProductReturns404() throws Exception {
+        given(imageService.getImage(999)).willThrow(new ProductNotFoundException(999));
+
+        mockMvc.perform(get("/api/products/999/image"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("PRODUCT_NOT_FOUND"));
+    }
+
+    @Test
+    void missingImageReturns404WithoutInternalDetails() throws Exception {
+        given(imageService.getImage(1)).willThrow(
+                new ProductImageNotFoundException("Image URL is not on the trusted product source host: evil.example"));
+
+        mockMvc.perform(get("/api/products/1/image"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("IMAGE_NOT_FOUND"))
+                .andExpect(result -> assertNoLeak(result.getResponse().getContentAsString(), "evil.example"));
+    }
+
+    @Test
+    void upstreamImageFailureReturns503WithoutInternalDetails() throws Exception {
+        given(imageService.getImage(1)).willThrow(
+                new ProductImageUnavailableException("Fake Store image request failed: Connection refused", null));
+
+        mockMvc.perform(get("/api/products/1/image"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("IMAGE_UNAVAILABLE"))
+                .andExpect(result -> assertNoLeak(result.getResponse().getContentAsString(), "Connection refused"));
+    }
+
+    private static void assertNoLeak(String body, String secret) {
+        if (body.contains(secret)) {
+            throw new AssertionError("Response leaked internal details: " + body);
+        }
     }
 }

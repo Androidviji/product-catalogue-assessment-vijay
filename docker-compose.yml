@@ -1,7 +1,7 @@
 # Local infrastructure. Free, no accounts needed.
 #
 # Mailpit is a local "fake inbox": it accepts email over SMTP and shows it in a web page.
-# It will receive enquiry emails in a later stage.
+# The backend sends enquiry emails here. Mailpit never delivers them to a real mailbox.
 #   SMTP:   localhost:1025
 #   Web UI: http://localhost:8025
 #

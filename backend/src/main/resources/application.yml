@@ -4,6 +4,19 @@ spring:
   mvc:
     problemdetails:
       enabled: true   # framework errors (e.g. 404) also use the problem-details JSON shape
+  # SMTP server for enquiry emails. Defaults point at the local Mailpit test inbox (docker-compose.yml),
+  # which accepts any message and never delivers it to a real mailbox.
+  mail:
+    host: ${SMTP_HOST:localhost}
+    port: ${SMTP_PORT:1025}
+    username: ${SMTP_USERNAME:}     # empty = no SMTP login (Mailpit needs none)
+    password: ${SMTP_PASSWORD:}     # never commit a real value; set it as an environment variable
+    properties:
+      mail.smtp.auth: ${SMTP_AUTH:false}
+      mail.smtp.starttls.enable: ${SMTP_STARTTLS:false}
+      mail.smtp.connectiontimeout: 5000   # milliseconds
+      mail.smtp.timeout: 5000
+      mail.smtp.writetimeout: 5000
 
 server:
   port: ${SERVER_PORT:8080}
@@ -15,6 +28,11 @@ catalogue:
   # Chosen by the business owner, shown on the home page in this order.
   # Not calculated from ratings. Override with the FEATURED_PRODUCT_IDS env var.
   featured-product-ids: ${FEATURED_PRODUCT_IDS:1,5,9,17,20}
+
+enquiry:
+  # Where customer enquiries are emailed, and the sender address used.
+  sales-inbox: ${ENQUIRY_SALES_INBOX:sales@officeworks.test}
+  from-address: ${ENQUIRY_FROM_ADDRESS:catalogue-app@officeworks.test}
 
 fake-store:
   base-url: ${FAKE_STORE_BASE_URL:https://fakestoreapi.com}

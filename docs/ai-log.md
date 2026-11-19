@@ -51,3 +51,66 @@ Issues hit (environment, not AI errors):
   tests were run with `./mvnw` from Git Bash instead. This does not affect a normal PowerShell window.
 
 AI mistakes caught in this stage: none yet.
+
+## Stage 2: remaining backend features
+
+- **Prompt (summary):** implement the remaining backend features only: categories with top three by
+  rating plus the rest, search, product details, an image endpoint by product ID, and an enquiry endpoint
+  that emails a configured sales inbox over SMTP (Mailpit locally). Keep the email sender behind an
+  interface. Add focused tests, run the real checks, update the README and these notes, and do not commit.
+  Inspect stage 1 first and preserve it.
+
+Decisions made during the build, with evidence:
+
+- **Checked the live data before choosing a tie-breaker.** Fake Store's `electronics` has two products
+  rated 4.8 (IDs 11 and 12), so a tie-breaker changes the real result. The order is rating desc, then rating
+  count desc, then ID asc. The whole category is sorted once and split after three products, so the
+  "top three" and "others" groups cannot overlap.
+- **Categories are derived from the product list,** not from Fake Store's categories endpoint. One source
+  of truth means a listed category is never empty. Unknown categories return 404 `CATEGORY_NOT_FOUND`.
+- **Blank search returns 400** `INVALID_SEARCH_QUERY` instead of "all products" or an empty list, so the
+  app can show a clear message. No matches returns 200 with an empty list.
+- **Image endpoint:** a separate one-method `ProductImageSource` interface, implemented by
+  `FakeStoreProductSource` so Fake Store knowledge stays in one class. Restrictions: same scheme, host and
+  port as the configured base URL, no redirects (JDK HttpClient default; covered by a test with a real
+  local HTTP server), png/jpeg/gif/webp only (SVG refused), 5 MB cap. Live check: the image for product 1
+  is `image/png`, 273,291 bytes. A missing image on Fake Store returns 404 with `text/html`.
+- **`ApiExceptionHandler` now extends `ResponseEntityExceptionHandler`** (a stage 1 change), so
+  validation errors can list each invalid field. The AI first checked, by inspecting the Boot 4.1.2 class
+  with `javap`, that Boot's own problem-details handler is `@ConditionalOnMissingBean(ResponseEntityExceptionHandler)`.
+  Framework errors therefore keep the problem-details shape, and there are no competing handlers.
+- **Enquiry success means the SMTP server accepted the message:** `JavaMailSender.send` returns only after
+  the server accepts it. Failures become `EmailDeliveryException`, then 503 `EMAIL_SEND_FAILED` with a
+  generic message. Logs record only the enquiry UUID, the product ID and the root-cause type and message. A
+  test captures log output and asserts the customer's name, email and message are absent.
+- **Product details in the email come from the product source,** not from the request.
+- `customerName` rejects control characters (line breaks), because it is copied into the email body.
+
+AI mistakes caught in this stage:
+
+- The AI wrote a search test asserting that `men's clothing` matches only the men's clothing product.
+  On re-reading it before running, the AI noticed that "women's clothing" contains "men's clothing" as a
+  substring, so the assertion was wrong. The test now asserts both match, and the README documents this as a
+  limitation of phrase (substring) matching.
+- The category controller test passed an encoded URL (`men%27s%20clothing`) as a String to MockMvc. That
+  is treated as a URI template and encoded again (`%` becomes `%25`), so the test failed (1 of 67).
+  Fixed by passing `URI.create(...)`.
+- The AI first wrote the enquiry integration test with `@MockitoBean ProductSource`. Before running it, the
+  AI realised that would replace the `FakeStoreProductSource` bean, which also provides
+  `ProductImageSource`, and break wiring. The test now mocks `CatalogueService` instead.
+
+Issues hit (environment, not AI errors):
+
+- In Claude Code's Bash tool, two multi-file heredoc commands containing apostrophes failed to parse
+  ("unexpected EOF"), and no files were written. The files were written with the file tool instead.
+- `mvnw.cmd` was run in PowerShell offline (`-o`) because of the sandbox DNS issue noted in stage 1.
+  `clean` failed only because the clean plugin was not cached, so `verify` was run without `clean`.
+
+Verification actually run (see the stage 2 summary for exact output):
+
+- `./mvnw -B test` (Git Bash) and `.\mvnw.cmd -B -o verify` (PowerShell 5.1): 67 tests, 0 failures, jar built.
+- The jar was run against live Fake Store and the local Mailpit container. Every endpoint was called,
+  including the error cases. One enquiry was sent from Git Bash and one from PowerShell, and both were seen in
+  Mailpit (via its API) with the correct From, To, Reply-To, subject and body.
+- A second instance with `SMTP_PORT=1` returned 503 `EMAIL_SEND_FAILED`. Mailpit's count did not change,
+  and its log had one warning line with no customer data and no stack trace.
