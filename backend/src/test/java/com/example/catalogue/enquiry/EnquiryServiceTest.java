@@ -68,16 +68,17 @@ class EnquiryServiceTest {
 
     @Test
     void emailFailureIsReportedAndLoggedWithoutCustomerDetails(CapturedOutput output) {
+        // A provider error that echoes the customer's address and a credential, as real SMTP errors can.
         EnquiryEmailSender failing = email -> {
             throw new EmailDeliveryException("SMTP server did not accept the enquiry email",
-                    new ConnectException("Connection refused"));
+                    new ConnectException("550 rejected Reply-To <sam@example.com> for user smtp-user"));
         };
         EnquiryService service = new EnquiryService(catalogue, failing, properties);
 
         assertThatThrownBy(() -> service.submit(request)).isInstanceOf(EmailDeliveryException.class);
 
-        assertThat(output).contains("for product 1 was not sent: ConnectException: Connection refused");
-        assertThat(output).doesNotContain("Sam Lee", "sam@example.com", "Is this in stock?");
+        assertThat(output).contains("for product 1 was not sent: ConnectException");
+        assertThat(output).doesNotContain("Sam Lee", "sam@example.com", "Is this in stock?", "550", "smtp-user");
     }
 
     @Test

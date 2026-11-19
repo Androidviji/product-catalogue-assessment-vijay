@@ -64,14 +64,28 @@ SMTP connect, read and write timeouts are 5 seconds each.
 
 ## API
 
-All errors use the same JSON shape ([RFC 9457 problem details](https://www.rfc-editor.org/rfc/rfc9457)) with a
-stable `code` the app can switch on. Error responses never contain stack traces, internal messages or
-upstream URLs.
+Errors from `/api/...` use the same JSON shape ([RFC 9457 problem details](https://www.rfc-editor.org/rfc/rfc9457))
+and always include a `code` the app can switch on. Error responses never contain stack traces, internal
+messages or upstream URLs, and our own messages never echo request values (Spring's default 404 detail does name the requested path).
 
 ```json
 { "status": 404, "title": "Product not found", "detail": "No product exists with ID 999.",
   "code": "PRODUCT_NOT_FOUND", "instance": "/api/products/999" }
 ```
+
+Where the `code` comes from:
+
+| Kind of error | `code` | Example |
+|---|---|---|
+| Catalogue and enquiry failures | a specific code | `PRODUCT_NOT_FOUND`, `EMAIL_SEND_FAILED`, ... (table below) |
+| Invalid enquiry fields | `VALIDATION_FAILED` + `errors` map | `{"errors": {"email": "must be a well-formed email address"}}` |
+| Request body missing, not JSON, or a field of the wrong type | `MALFORMED_REQUEST` (400) | `{ not json`, `"productId": "abc"` |
+| Path or query value of the wrong type | `INVALID_PARAMETER` (400) | `/api/products/abc`, with detail `The value of 'id' is not valid.` |
+| Other framework errors | the HTTP status name | `NOT_FOUND` (unknown URL), `METHOD_NOT_ALLOWED`, `UNSUPPORTED_MEDIA_TYPE` |
+| Anything unexpected | `INTERNAL_ERROR` (500) | generic detail `Something went wrong. Please try again later.`; full error logged on the server |
+
+The app should handle the specific codes it cares about and treat any other code as a generic error,
+using `status`.
 
 | Endpoint | Success | Errors (`code`) |
 |---|---|---|
@@ -79,9 +93,9 @@ upstream URLs.
 | `GET /api/categories` | 200 | 503 `PRODUCT_SOURCE_UNAVAILABLE` |
 | `GET /api/categories/{category}/products` | 200 | 404 `CATEGORY_NOT_FOUND`, 503 |
 | `GET /api/products/search?q=text` | 200 (may be empty) | 400 `INVALID_SEARCH_QUERY`, 503 |
-| `GET /api/products/{id}` | 200 | 404 `PRODUCT_NOT_FOUND`, 400 (non-numeric ID), 503 |
+| `GET /api/products/{id}` | 200 | 404 `PRODUCT_NOT_FOUND`, 400 `INVALID_PARAMETER` (non-numeric ID), 503 |
 | `GET /api/products/{id}/image` | 200 image bytes | 404 `PRODUCT_NOT_FOUND` / `IMAGE_NOT_FOUND`, 503 `IMAGE_UNAVAILABLE` / `PRODUCT_SOURCE_UNAVAILABLE` |
-| `POST /api/enquiries` | 200 | 400 `VALIDATION_FAILED`, 400 (malformed JSON), 404 `PRODUCT_NOT_FOUND`, 503 `EMAIL_SEND_FAILED`, 503 |
+| `POST /api/enquiries` | 200 | 400 `VALIDATION_FAILED`, 400 `MALFORMED_REQUEST`, 404 `PRODUCT_NOT_FOUND`, 415 `UNSUPPORTED_MEDIA_TYPE`, 503 `EMAIL_SEND_FAILED`, 503 |
 
 A "product" in every response has this shape. It deliberately has no image URL; use `/api/products/{id}/image`.
 
@@ -150,7 +164,7 @@ The three highest-rated products in the category, then all the remaining ones.
 
 ### `GET /api/products/{id}`
 
-One product, or `404 PRODUCT_NOT_FOUND`. A non-numeric ID returns 400.
+One product, or `404 PRODUCT_NOT_FOUND`. A non-numeric ID returns `400 INVALID_PARAMETER`.
 
 ### `GET /api/products/{id}/image`
 
@@ -216,10 +230,12 @@ The email goes to `ENQUIRY_SALES_INBOX`, with Reply-To set to the customer's add
 category, price), the customer's name and email, the message, and the enquiry reference. Product details
 come from the product source, not from the request.
 
-**Logging:** the server logs only the enquiry reference and product ID, for example
-`Enquiry 59ab5db6-... for product 1 accepted by the mail server`, or on failure
-`... was not sent: ConnectException: Connection refused`. These log lines never include the customer's
-name, email address or message, SMTP credentials, or a stack trace.
+**Logging:** enquiry log lines contain only the enquiry reference, the product ID and, on failure, the
+exception type. For example `Enquiry 59ab5db6-... for product 1 accepted by the mail server`, or
+`Enquiry 59ab5db6-... for product 1 was not sent: ConnectException`. The SMTP provider's error message is
+**not** logged, because it can echo email addresses or message content. These lines never include the
+customer's name, email address or message, SMTP credentials, or a stack trace. To diagnose a send failure,
+use the exception type and check the SMTP server's own logs (for Mailpit, http://localhost:8025).
 
 ## Example requests (Windows PowerShell)
 
@@ -289,6 +305,11 @@ To see the email-failure response, run the backend with an SMTP port where nothi
 
 ## Assumptions and limitations
 
+- **Error codes for framework errors** other than malformed bodies and wrong parameter types are the HTTP
+  status name, for example `NOT_FOUND`, and their `detail` is Spring's default wording. Errors raised outside
+  Spring MVC, such as a failure in the servlet container before a controller is chosen, go to Spring Boot's
+  `/error` page. That page never includes stack traces or messages, but it has no `code`.
+
 - **No caching.** Every request fetches the full product list (20 products) from Fake Store, and every
   image request fetches the image again. This is simple and always current. A short in-memory cache
   would be the first change for real traffic. The image response's `Cache-Control` lets the app cache images.
@@ -353,5 +374,5 @@ src/main/java/com/example/catalogue/
 4. `EnquiryEmailSender.send` is called. The SMTP implementation returns only when the SMTP server has
    accepted the message.
 5. Accepted: the service logs the reference and product ID, and the client gets `200 {"status":"SENT"}`.
-   Not accepted: the service logs the reference, product ID and the failure's type and message, and the
+   Not accepted: the service logs the reference, product ID and the exception type (not the provider's message), and the
    client gets `503 EMAIL_SEND_FAILED`.

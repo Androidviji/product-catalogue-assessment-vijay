@@ -94,11 +94,33 @@ class EnquiryControllerTest {
     }
 
     @Test
-    void malformedJsonReturns400() throws Exception {
-        postJson("{ not json").andExpect(status().isBadRequest());
+    void malformedJsonReturns400WithCodeAndWithoutEchoingInput() throws Exception {
+        postJson("{ not json")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MALFORMED_REQUEST"));
         postJson("""
-                { "productId": "abc", "customerName": "Sam", "email": "sam@example.com" }
-                """).andExpect(status().isBadRequest());
+                { "productId": "abc123xyz", "customerName": "Sam", "email": "sam@example.com" }
+                """)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MALFORMED_REQUEST"))
+                .andExpect(result -> {
+                    String body = result.getResponse().getContentAsString();
+                    if (body.contains("abc123xyz") || body.contains("sam@example.com") || body.contains("Jackson")) {
+                        throw new AssertionError("Response echoed input or parser details: " + body);
+                    }
+                });
+        mockMvc.perform(post("/api/enquiries").contentType(MediaType.APPLICATION_JSON))   // no body at all
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("MALFORMED_REQUEST"));
+
+        verify(enquiryService, never()).submit(any());
+    }
+
+    @Test
+    void nonJsonContentTypeReturns415WithStatusCode() throws Exception {
+        mockMvc.perform(post("/api/enquiries").contentType(MediaType.TEXT_PLAIN).content("hello"))
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(jsonPath("$.code").value("UNSUPPORTED_MEDIA_TYPE"));
     }
 
     @Test

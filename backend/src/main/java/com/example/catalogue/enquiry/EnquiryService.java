@@ -49,10 +49,10 @@ public class EnquiryService {
         try {
             emailSender.send(email);
         } catch (EmailDeliveryException e) {
-            // Root cause type and message only (for example "ConnectException: Connection refused").
-            Throwable root = rootCause(e);
-            log.warn("Enquiry {} for product {} was not sent: {}: {}",
-                    enquiryId, product.id(), root.getClass().getSimpleName(), root.getMessage());
+            // Exception type only (for example "ConnectException"). The provider's message is never
+            // logged: SMTP errors can echo email addresses or other message content.
+            log.warn("Enquiry {} for product {} was not sent: {}",
+                    enquiryId, product.id(), rootCause(e).getClass().getSimpleName());
             throw e;
         }
         log.info("Enquiry {} for product {} accepted by the mail server", enquiryId, product.id());

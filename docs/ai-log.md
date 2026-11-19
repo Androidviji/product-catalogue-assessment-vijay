@@ -114,3 +114,23 @@ Verification actually run (see the stage 2 summary for exact output):
   Mailpit (via its API) with the correct From, To, Reply-To, subject and body.
 - A second instance with `SMTP_PORT=1` returned 503 `EMAIL_SEND_FAILED`. Mailpit's count did not change,
   and its log had one warning line with no customer data and no stack trace.
+
+## Stage 2 review fixes
+
+- **Review finding:** `EnquiryService` logged the root SMTP exception's message on send failure, which
+  could contain customer email addresses. The AI introduced this in stage 2, and the stage 2 notes above
+  record that version ("root-cause type and message"). It now logs only the enquiry ID, the product ID and
+  the exception type. The test uses a provider error that echoes the customer's address and an SMTP user
+  name, and asserts that neither reaches the log.
+- **Review finding:** the README said every error has a `code`, but framework errors (malformed JSON,
+  wrong path-variable type, unknown URL, wrong method) had none. Malformed JSON and type mismatches now get
+  specific codes with safe text that does not echo the value (`MALFORMED_REQUEST`, `INVALID_PARAMETER`).
+  Other framework errors get their HTTP status name as the code, and unexpected exceptions get a generic
+  500 `INTERNAL_ERROR`.
+- **AI mistake caught by tests:** the first version added the fallback code to the `body` passed into
+  `handleExceptionInternal`. For most framework errors, Spring passes `null` there and builds the problem
+  detail inside `super`, so 404, 405 and 415 still had no code (3 test failures). Fixed by adding the code to
+  the response returned by `super`.
+- A new test first treated the rejected value appearing in `instance` (the request path) as a leak. That
+  is the client's own URL, so the test now checks `detail` instead.
+- Result: `./mvnw -B test`: 71 tests, 0 failures.

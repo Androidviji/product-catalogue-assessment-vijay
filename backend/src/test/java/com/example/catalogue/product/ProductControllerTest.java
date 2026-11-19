@@ -2,6 +2,7 @@ package com.example.catalogue.product;
 
 import static com.example.catalogue.product.TestProducts.product;
 import static org.mockito.BDDMockito.given;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -102,9 +103,40 @@ class ProductControllerTest {
     }
 
     @Test
-    void nonNumericProductIdReturns400() throws Exception {
-        mockMvc.perform(get("/api/products/abc"))
-                .andExpect(status().isBadRequest());
+    void nonNumericProductIdReturns400WithCodeAndWithoutEchoingTheValue() throws Exception {
+        mockMvc.perform(get("/api/products/abc123xyz"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_PARAMETER"))
+                // detail names the parameter but not the rejected value (instance is just the client's own URL)
+                .andExpect(jsonPath("$.detail").value("The value of 'id' is not valid."));
+    }
+
+    // --- framework and unexpected errors -------------------------------------
+
+    @Test
+    void unknownUrlReturns404WithStatusCode() throws Exception {
+        mockMvc.perform(get("/api/does-not-exist"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+    }
+
+    @Test
+    void wrongHttpMethodReturns405WithStatusCode() throws Exception {
+        mockMvc.perform(delete("/api/products/featured"))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(jsonPath("$.code").value("METHOD_NOT_ALLOWED"));
+    }
+
+    @Test
+    void unexpectedErrorReturnsGeneric500WithoutInternalDetails() throws Exception {
+        given(catalogueService.getProduct(1)).willThrow(new IllegalStateException("secret internal detail"));
+
+        mockMvc.perform(get("/api/products/1"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.code").value("INTERNAL_ERROR"))
+                .andExpect(jsonPath("$.detail").value("Something went wrong. Please try again later."))
+                .andExpect(result -> assertNoLeak(result.getResponse().getContentAsString(), "secret internal detail"))
+                .andExpect(result -> assertNoLeak(result.getResponse().getContentAsString(), "IllegalStateException"));
     }
 
     // --- search --------------------------------------------------------------
