@@ -1,0 +1,22 @@
+spring:
+  application:
+    name: catalogue-backend
+  mvc:
+    problemdetails:
+      enabled: true   # framework errors (e.g. 404) also use the problem-details JSON shape
+
+server:
+  port: ${SERVER_PORT:8080}
+  error:
+    include-stacktrace: never
+    include-message: never
+
+catalogue:
+  # Chosen by the business owner, shown on the home page in this order.
+  # Not calculated from ratings. Override with the FEATURED_PRODUCT_IDS env var.
+  featured-product-ids: ${FEATURED_PRODUCT_IDS:1,5,9,17,20}
+
+fake-store:
+  base-url: ${FAKE_STORE_BASE_URL:https://fakestoreapi.com}
+  connect-timeout: ${FAKE_STORE_CONNECT_TIMEOUT:3s}
+  read-timeout: ${FAKE_STORE_READ_TIMEOUT:5s}
