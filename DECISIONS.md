@@ -21,7 +21,7 @@ The client and backend choice, and the reasons for it, are in the README
 | **Currency** | Prices are shown as Australian dollars (`en-AU` format). | Fake Store prices have no currency; the client is Australian. |
 | **Product images** | The app loads images through the backend (`/api/products/{id}/image`), never from Fake Store directly. The backend fetches only image URLs from the product data, on the Fake Store host, with no redirects, png/jpeg/gif/webp only, at most 5 MB. | The brief says all product data must go through the backend. Taking only a product ID means a client can't make the backend fetch arbitrary URLs. |
 | **Enquiry form** | Name and email are required; the message is optional. The app checks the same rules as the backend, and the backend validates everything again. The product details in the email come from the product source, not from the app. | Contact details plus an optional question is the minimum useful enquiry. |
-| **"The sales inbox will receive an email"** | Success is reported only after the configured SMTP server has accepted the message. The sales inbox is configuration (`ENQUIRY_SALES_INBOX`). Locally it is Mailpit, which captures mail and never delivers it to a real mailbox. | The PoC can show real email delivery without paid services or accounts. |
+| **"The sales inbox will receive an email"** | Success is reported only after the configured SMTP server has accepted the message. The sales inbox is configuration (`ENQUIRY_SALES_INBOX`). Locally it is Mailpit, which captures mail and never delivers it to a real mailbox. | The PoC can demonstrate SMTP acceptance and local email capture without paid services or accounts; Mailpit does not deliver to a real mailbox. |
 | **"The customer will see a Thank you message"** | Shown only after that confirmed success, never optimistically. | Saying thank you for an email that wasn't sent would mislead the customer. |
 
 ## Requirements dropped or simplified, and why
@@ -56,8 +56,7 @@ behind a single boundary:
 | **API changes** | Android DTOs are mapped to domain models in the data layer. Unknown JSON fields are ignored, and unknown error codes fall back to safe generic messages. | Additive backend changes don't break the app. |
 | **Deployment** | The backend is a single runnable jar configured entirely by environment variables, with no local state. | It could run on an AWS container or app service, with SMTP pointed at a managed provider. Not tried. |
 
-Errors use one JSON format ([RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) problem details) with a
-stable `code`, so new clients can rely on it.
+Common controller and framework errors use [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) problem details with a stable `code`. Errors handled outside controller advice may lack a code, so clients need a generic fallback.
 
 ## Known limitations
 
