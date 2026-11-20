@@ -1,0 +1,26 @@
+# Local configuration and secrets
+.env
+*.env.local
+
+# Assessment brief: not part of the solution
+*.pdf
+
+# Java / Maven
+target/
+.mvn/wrapper/maven-wrapper.jar
+
+# Android / Gradle (later stages)
+.gradle/
+.kotlin/
+build/
+local.properties
+*.apk
+*.aab
+captures/
+
+# IDEs and OS files
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db
