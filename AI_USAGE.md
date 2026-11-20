@@ -8,7 +8,7 @@ build, with more detail, are in [`docs/ai-log.md`](docs/ai-log.md).
 | Tool | Model | What it was used for |
 |---|---|---|
 | **Claude Code** (Anthropic's terminal coding agent) | Claude Opus 5.5 | Planning from the assessment PDF; writing all code, tests and docs; running builds and tests; starting the backend; driving the Android emulator through `adb` and UI Automator dumps; checking results through the Mailpit API and emulator screenshots; reporting what it had and hadn't verified. |
-| **ChatGPT** | Model not recorded | Discussing the assessment; developing and refining the prompts given to Claude Code; reviewing code after it was pushed to GitHub. |
+| **ChatGPT** | Model 6.1 terra  recorded | Discussing the assessment; developing and refining the prompts given to Claude Code; reviewing code after it was pushed to GitHub. |
 
 ChatGPT didn't edit the code or run anything locally. Its review findings were given to Claude Code as
 prompts; Claude Code investigated, changed the code and ran the tests.
