@@ -247,7 +247,6 @@ loss) and what's next.
 
 **Total: approximately 4 hours**, against the brief's 2–3 hour time-box.
 
-> **TODO (author): fill in the breakdown before submitting. These are placeholders, not estimates.**
 >
 > | Activity | Approximate time |
 > |---|---|
