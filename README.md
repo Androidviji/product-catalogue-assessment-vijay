@@ -99,7 +99,7 @@ cd android
 
 ## Try it end to end
 
-The critical user journey is **Home → Category → Product → Enquire → Thank you → the email in Mailpit**,
+The main user journey is **Home → Category → Product → Enquire → Thank you → the email in Mailpit**,
 plus **Search**. The last column says what was actually checked by hand on the API 37 emulator, against
 the local backend and Mailpit. Those checks were done before the last two enquiry-outcome changes.
 
