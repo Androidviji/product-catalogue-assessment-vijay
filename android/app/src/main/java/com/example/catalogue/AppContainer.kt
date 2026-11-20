@@ -46,10 +46,11 @@ class AppContainer(
     private val api: CatalogueApi = retrofit.create(CatalogueApi::class.java)
 
     /**
-     * Enquiries (POST) must never be sent twice by OkHttp itself. With the default
+     * Enquiries (POST) use connection-failure retries disabled to avoid a known replay path. With the default
      * retryOnConnectionFailure = true, OkHttp resends a request whose connection fails after it was
      * written (for example a stale keep-alive connection), which could email the sales team twice.
      * newBuilder() shares the connection pool and threads; only the retry setting differs.
+     * Redirects and other intermediaries can still cause duplicates; see README.md.
      */
     private val enquiryApi: CatalogueApi = retrofit.newBuilder()
         .client(okHttpClient.newBuilder().retryOnConnectionFailure(false).build())
