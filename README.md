@@ -42,7 +42,16 @@ Setup time hasn't been measured on a clean machine.
 
 ## Run everything end to end
 
-**1. Start Mailpit** (PowerShell, repo root; Docker Desktop running):
+**0. Clone the repository and enter the project folder** (PowerShell):
+
+```powershell
+git clone --branch feature/catalogue-app https://github.com/Androidviji/product-catalogue-assessment-vijay.git
+cd product-catalogue-assessment-vijay
+```
+
+This folder is the **repository root**. Run the next command from here.
+
+**1. Start Mailpit** (PowerShell, repository root; Docker Desktop running):
 
 ```powershell
 docker compose up -d mailpit
@@ -57,7 +66,8 @@ use that one instead; the backend only needs something listening on localhost:10
 > real SMTP provider, configured with the `SMTP_*` and `ENQUIRY_*` environment variables
 > (see [`backend/README.md`](backend/README.md#configuration)).
 
-**2. Start the backend** (a second PowerShell window):
+**2. Start the backend** in the same PowerShell window, from the repository root. If you open a new window, first change to your cloned repository folder:
+
 
 ```powershell
 cd backend
