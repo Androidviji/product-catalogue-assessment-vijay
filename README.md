@@ -251,7 +251,7 @@ loss) and what's next.
 >
 > | Activity | Approximate time |
 > |---|---|
-> | Planning | _TBD_ |
-> | Building | _TBD_ |
-> | Testing | _TBD_ |
-> | Review | _TBD_ |
+> | Planning | 30 min |
+> | Building | 2 hours |
+> | Testing | 45 min |
+> | Review | 45 min |
